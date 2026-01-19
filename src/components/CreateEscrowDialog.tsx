@@ -15,13 +15,15 @@ import { Label } from '@/components/ui/label';
 import { Plus, Loader2 } from 'lucide-react';
 
 interface CreateEscrowDialogProps {
-  onSubmit: (description: string, freelancer: string, amount: string) => Promise<number>;
+  onSubmit: (description: string, freelancer: string, amount: string) => Promise<any>;
   isLoading: boolean;
+  disabled?: boolean;
 }
 
 export const CreateEscrowDialog: React.FC<CreateEscrowDialogProps> = ({
   onSubmit,
   isLoading,
+  disabled = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
@@ -51,17 +53,21 @@ export const CreateEscrowDialog: React.FC<CreateEscrowDialogProps> = ({
   const handleSubmit = async () => {
     if (!validate()) return;
     
-    await onSubmit(description, freelancer, amount);
-    setDescription('');
-    setFreelancer('');
-    setAmount('');
-    setOpen(false);
+    try {
+      await onSubmit(description, freelancer, amount);
+      setDescription('');
+      setFreelancer('');
+      setAmount('');
+      setOpen(false);
+    } catch (error) {
+      // Error already handled by the hook
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2 bg-primary hover:bg-primary/90 font-semibold">
+        <Button className="gap-2 bg-primary hover:bg-primary/90 font-semibold" disabled={disabled}>
           <Plus className="h-4 w-4" />
           Create Escrow
         </Button>

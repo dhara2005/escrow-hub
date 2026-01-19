@@ -1,18 +1,20 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EscrowCard } from './EscrowCard';
 import { CreateEscrowDialog } from './CreateEscrowDialog';
 import { EarningsCard } from './EarningsCard';
 import { StatsCards } from './StatsCards';
-import { useWallet } from '@/context/WalletContext';
-import { useEscrows } from '@/hooks/useEscrows';
-import { Briefcase, User, FileX } from 'lucide-react';
+import { useEscrowContract } from '@/hooks/useEscrowContract';
+import { ESCROW_CONTRACT_ADDRESS } from '@/contracts/escrowABI';
+import { Briefcase, User, FileX, AlertTriangle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export const Dashboard: React.FC = () => {
-  const { wallet } = useWallet();
   const {
+    isContractReady,
     clientEscrows,
     freelancerEscrows,
+    escrows,
     earnings,
     isLoading,
     createEscrow,
@@ -22,14 +24,9 @@ export const Dashboard: React.FC = () => {
     dispute,
     cancelEscrow,
     withdrawEarnings,
-  } = useEscrows(wallet.address);
+  } = useEscrowContract();
 
-  const allEscrows = [...clientEscrows, ...freelancerEscrows];
-  // Remove duplicates
-  const uniqueEscrows = allEscrows.filter(
-    (escrow, index, self) =>
-      index === self.findIndex((e) => e.escrowId === escrow.escrowId)
-  );
+  const uniqueEscrows = escrows;
 
   const EmptyState = ({ message }: { message: string }) => (
     <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -42,6 +39,18 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="container py-8 space-y-8">
+      {/* Contract Warning */}
+      {!ESCROW_CONTRACT_ADDRESS && (
+        <Alert variant="destructive" className="border-warning/50 bg-warning/10">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Contract Not Configured</AlertTitle>
+          <AlertDescription>
+            Please deploy your escrow contract and add the address to{' '}
+            <code className="bg-muted px-1 rounded">src/contracts/escrowABI.ts</code>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Stats Overview */}
       <StatsCards escrows={uniqueEscrows} />
 
@@ -51,7 +60,7 @@ export const Dashboard: React.FC = () => {
         <div className="lg:col-span-2 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold">My Escrows</h2>
-            <CreateEscrowDialog onSubmit={createEscrow} isLoading={isLoading} />
+            <CreateEscrowDialog onSubmit={createEscrow} isLoading={isLoading} disabled={!isContractReady} />
           </div>
 
           <Tabs defaultValue="client" className="w-full">
