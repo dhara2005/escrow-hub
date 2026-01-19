@@ -1,27 +1,48 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { BrowserProvider, formatEther } from 'ethers';
+import { BrowserProvider, formatEther, Eip1193Provider } from 'ethers';
 import { WalletState } from '@/types/escrow';
 import { toast } from 'sonner';
 
-declare global {
-  interface Window {
-    ethereum?: {
-      isMetaMask?: boolean;
-      request: (args: { method: string; params?: any[] }) => Promise<any>;
-      on: (event: string, callback: (...args: any[]) => void) => void;
-      removeListener: (event: string, callback: (...args: any[]) => void) => void;
-    };
-  }
-}
+export type WalletType = 'metamask' | 'coinbase' | 'trust' | 'injected';
 
 interface WalletContextType {
   wallet: WalletState;
-  connect: () => Promise<void>;
+  walletType: WalletType | null;
+  connect: (type?: WalletType) => Promise<void>;
   disconnect: () => void;
   provider: BrowserProvider | null;
+  isConnecting: boolean;
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
+
+const getProvider = (type: WalletType): Eip1193Provider | null => {
+  if (typeof window.ethereum === 'undefined') return null;
+  
+  // Handle multiple injected providers
+  if (window.ethereum.providers?.length) {
+    switch (type) {
+      case 'metamask':
+        return window.ethereum.providers.find((p) => p.isMetaMask) || null;
+      case 'coinbase':
+        return window.ethereum.providers.find((p) => p.isCoinbaseWallet) || null;
+      default:
+        return window.ethereum.providers[0] || null;
+    }
+  }
+  
+  return window.ethereum;
+};
+
+const detectWalletType = (): WalletType | null => {
+  if (typeof window.ethereum === 'undefined') return null;
+  
+  if (window.ethereum.isMetaMask) return 'metamask';
+  if (window.ethereum.isCoinbaseWallet) return 'coinbase';
+  if (window.ethereum.isTrust) return 'trust';
+  
+  return 'injected';
+};
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [wallet, setWallet] = useState<WalletState>({
@@ -30,30 +51,39 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     balance: '0',
   });
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
+  const [walletType, setWalletType] = useState<WalletType | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
 
-  const connect = useCallback(async () => {
-    if (typeof window.ethereum === 'undefined') {
-      toast.error('MetaMask not detected', {
-        description: 'Please install MetaMask to connect your wallet.',
+  const connect = useCallback(async (type: WalletType = 'injected') => {
+    setIsConnecting(true);
+    
+    const injectedProvider = getProvider(type);
+    
+    if (!injectedProvider) {
+      toast.error('No wallet detected', {
+        description: 'Please install a Web3 wallet like MetaMask, Coinbase Wallet, or Trust Wallet.',
       });
-      window.open('https://metamask.io/download/', '_blank');
+      setIsConnecting(false);
       return;
     }
 
     try {
-      const browserProvider = new BrowserProvider(window.ethereum);
+      const browserProvider = new BrowserProvider(injectedProvider);
       const accounts = await browserProvider.send('eth_requestAccounts', []);
       
       if (accounts.length === 0) {
         toast.error('No accounts found');
+        setIsConnecting(false);
         return;
       }
 
       const address = accounts[0];
       const balance = await browserProvider.getBalance(address);
       const formattedBalance = formatEther(balance);
+      const detectedType = detectWalletType() || type;
 
       setProvider(browserProvider);
+      setWalletType(detectedType);
       setWallet({
         address,
         isConnected: true,
@@ -74,6 +104,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           description: error.message || 'Failed to connect wallet.',
         });
       }
+    } finally {
+      setIsConnecting(false);
     }
   }, []);
 
@@ -84,19 +116,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       balance: '0',
     });
     setProvider(null);
+    setWalletType(null);
     toast.info('Wallet disconnected');
   }, []);
 
-  // Listen for account changes
+  // Listen for account/chain changes
   useEffect(() => {
-    if (typeof window.ethereum === 'undefined') return;
+    if (typeof window.ethereum === 'undefined' || !window.ethereum.on) return;
 
     const handleAccountsChanged = async (accounts: string[]) => {
       if (accounts.length === 0) {
         disconnect();
       } else if (wallet.isConnected && accounts[0] !== wallet.address) {
-        // Account switched
-        const browserProvider = new BrowserProvider(window.ethereum!);
+        const injectedProvider = getProvider(walletType || 'injected');
+        if (!injectedProvider) return;
+        
+        const browserProvider = new BrowserProvider(injectedProvider);
         const balance = await browserProvider.getBalance(accounts[0]);
         const formattedBalance = formatEther(balance);
 
@@ -114,7 +149,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
 
     const handleChainChanged = () => {
-      // Reload the page on chain change as recommended by MetaMask
       window.location.reload();
     };
 
@@ -122,13 +156,13 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     window.ethereum.on('chainChanged', handleChainChanged);
 
     return () => {
-      window.ethereum?.removeListener('accountsChanged', handleAccountsChanged);
-      window.ethereum?.removeListener('chainChanged', handleChainChanged);
+      window.ethereum?.removeListener?.('accountsChanged', handleAccountsChanged);
+      window.ethereum?.removeListener?.('chainChanged', handleChainChanged);
     };
-  }, [wallet.isConnected, wallet.address, disconnect]);
+  }, [wallet.isConnected, wallet.address, walletType, disconnect]);
 
   return (
-    <WalletContext.Provider value={{ wallet, connect, disconnect, provider }}>
+    <WalletContext.Provider value={{ wallet, walletType, connect, disconnect, provider, isConnecting }}>
       {children}
     </WalletContext.Provider>
   );
